@@ -3,7 +3,7 @@
 This directory is a reference implementation for a team repository that consumes the `terraform-factory`. Copy this structure into a new repository to get started.
 
 The consumer repository contains **no Terraform code**. All infrastructure logic lives in the factory. The consumer provides:
-- `config.json` — all environment configuration (names, SKUs, regions, backend details)
+- `config.json` — all environment configuration (workload, SKUs, regions, backend details)
 - `.github/workflows/deploy.yml` — calls the factory's reusable pipeline
 - `custom/` *(optional)* — any additional Terraform resources not covered by the factory
 
@@ -101,13 +101,20 @@ The pipeline requires GitHub Environments with required reviewer approval before
 
 ## Configuration Reference (`config.json`)
 
-All values the factory needs come from a single `config.json`. The file has three top-level sections:
+All values the factory needs come from a single `config.json`. The file has four top-level fields (`workload`, `environment`, `location`, `location_short`) plus three sections (`backend`, `landing_zone`, `application`):
 
 ### Top-level fields
 
 | Field | Description |
 |-------|-------------|
+| `workload` | Short workload name used to build all resource names (e.g. `myapp`) |
 | `environment` | Deployment environment: `dev`, `staging`, or `prod`. Determines the GitHub approval environment (`{environment}-apply`). |
+| `location` | Azure region for all resources (e.g. `uksouth`) |
+| `location_short` | Short region code appended to every resource name (e.g. `uks`, `euw`) |
+
+All four fields are automatically injected into every stage — do not repeat `workload`, `location`, or `location_short` inside the `landing_zone` or `application` sections.
+
+Resource names are derived by the factory using the pattern `{prefix}-{workload}-{environment}-{location_short}`. You never supply individual resource names.
 
 ### `backend` section
 
@@ -123,21 +130,21 @@ Configures the Azure Storage Account used for Terraform remote state. The factor
 
 ### `landing_zone` section
 
-All inputs for the landing zone module. See the [Landing Zone module docs](../README.md#landing-zone-module) for the full variable reference.
+Networking, Key Vault, and logging configuration. See the [Landing Zone module docs](../README.md#landing-zone-module) for the full variable reference.
 
-The `environment` key is automatically injected from the top level — do not duplicate it here.
+Do not include `workload`, `environment`, `location`, or `location_short` — these are injected automatically from the top-level fields. Do not include resource names — all names are derived by the factory.
 
 ### `application` section
 
-All inputs for the application module. The following fields are **automatically resolved** from the landing zone remote state and should **not** be included:
-- `resource_group_name`
-- `vnet_integration_subnet_id`
-- `log_analytics_workspace_id`
-- `key_vault_id`
+SKU, runtime stack, and SQL admin configuration. See the [Application module docs](../README.md#application-module) for the full variable reference.
+
+The following are resolved automatically and must **not** be in this section:
+- `workload`, `environment`, `location`, `location_short` — injected from top level
+- `resource_group_name`, `vnet_integration_subnet_id`, `log_analytics_workspace_id`, `key_vault_id` — resolved from landing zone remote state
+- All resource names — derived by the factory
+- `sql_aad_admin_object_id` — resolved automatically from `sql_aad_admin_login` via an `azuread_group` data source
 
 Use `vnet_integration_subnet_name` to specify which subnet from the landing zone the App Service should integrate with (default: `snet-app`).
-
-The `environment` key is automatically injected from the top level.
 
 ---
 
@@ -177,7 +184,7 @@ The factory pipeline automatically merges these files into the stage working dir
 
 ```hcl
 resource "azurerm_storage_account" "extra" {
-  name                = "stextra${var.environment}"
+  name                = "st${var.workload}extra${var.location_short}"
   resource_group_name = module.landing_zone.resource_group_name
   location            = var.location
   ...

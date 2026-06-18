@@ -1,11 +1,16 @@
-variable "resource_group_name" {
+variable "workload" {
   type        = string
-  description = "Name of the resource group"
+  description = "Workload name used to derive resource names"
 }
 
 variable "location" {
   type        = string
   description = "Azure region for all resources"
+}
+
+variable "location_short" {
+  type        = string
+  description = "Short region code used in resource names (e.g. uks, euw)"
 }
 
 variable "environment" {
@@ -15,11 +20,6 @@ variable "environment" {
     condition     = contains(["dev", "staging", "prod"], var.environment)
     error_message = "Environment must be one of: dev, staging, prod."
   }
-}
-
-variable "vnet_name" {
-  type        = string
-  description = "Name of the virtual network"
 }
 
 variable "vnet_address_space" {
@@ -33,11 +33,6 @@ variable "subnets" {
     service_endpoints = optional(list(string), [])
   }))
   description = "Map of subnet names to their configuration"
-}
-
-variable "key_vault_name" {
-  type        = string
-  description = "Name of the Key Vault (globally unique, 3-24 alphanumeric and hyphens)"
 }
 
 variable "key_vault_sku" {
@@ -58,11 +53,6 @@ variable "key_vault_network_default_action" {
     condition     = contains(["Allow", "Deny"], var.key_vault_network_default_action)
     error_message = "Key Vault network default action must be Allow or Deny."
   }
-}
-
-variable "log_analytics_workspace_name" {
-  type        = string
-  description = "Name of the Log Analytics workspace"
 }
 
 variable "log_analytics_sku" {

@@ -1,8 +1,12 @@
-variable "resource_group_name" {
+variable "workload" {
   type = string
 }
 
 variable "location" {
+  type = string
+}
+
+variable "location_short" {
   type = string
 }
 
@@ -12,10 +16,6 @@ variable "environment" {
     condition     = contains(["dev", "staging", "prod"], var.environment)
     error_message = "environment must be one of: dev, staging, prod."
   }
-}
-
-variable "vnet_name" {
-  type = string
 }
 
 variable "vnet_address_space" {
@@ -29,10 +29,6 @@ variable "subnets" {
   }))
 }
 
-variable "key_vault_name" {
-  type = string
-}
-
 variable "key_vault_sku" {
   type    = string
   default = "standard"
@@ -41,10 +37,6 @@ variable "key_vault_sku" {
 variable "key_vault_network_default_action" {
   type    = string
   default = "Allow"
-}
-
-variable "log_analytics_workspace_name" {
-  type = string
 }
 
 variable "log_analytics_sku" {

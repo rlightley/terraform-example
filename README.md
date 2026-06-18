@@ -129,24 +129,35 @@ Deploys the foundational Azure infrastructure that the application layer depends
 
 #### Inputs (`config.json` → `landing_zone` section)
 
+The following top-level config fields are automatically injected into all stages — do not repeat them in the stage sections:
+
+| Top-level key | Description |
+|---------------|-------------|
+| `workload` | Short workload name used to build all resource names (e.g. `myapp`) |
+| `environment` | Deployment environment: `dev`, `staging`, or `prod` |
+| `location` | Azure region (e.g. `uksouth`) |
+| `location_short` | Short region code used in resource names (e.g. `uks`, `euw`) |
+
+Resource names are derived automatically using the pattern `{prefix}-{workload}-{environment}-{location_short}`:
+
+| Resource | Derived name |
+|----------|-------------|
+| Resource group | `rg-{workload}-{environment}-{location_short}` |
+| Virtual network | `vnet-{workload}-{environment}-{location_short}` |
+| Key Vault | `kv-{workload}-{environment}-{location_short}` |
+| Log Analytics workspace | `log-{workload}-{environment}-{location_short}` |
+
 | Key | Type | Default | Required | Description |
 |-----|------|---------|----------|-------------|
-| `resource_group_name` | string | — | Yes | Resource group name |
-| `location` | string | — | Yes | Azure region |
-| `vnet_name` | string | — | Yes | Virtual network name |
 | `vnet_address_space` | list(string) | — | Yes | CIDR blocks |
 | `subnets` | map | — | Yes | `{ name: { address_prefix, service_endpoints? } }` |
-| `key_vault_name` | string | — | Yes | Globally unique (3–24 chars) |
 | `key_vault_sku` | string | `"standard"` | No | `standard` or `premium` |
 | `key_vault_network_default_action` | string | `"Allow"` | No | `Allow` or `Deny`. See [Key Vault Network Access](#key-vault-network-access) |
-| `log_analytics_workspace_name` | string | — | Yes | Log Analytics workspace name |
 | `log_analytics_sku` | string | `"PerGB2018"` | No | Billing SKU |
 | `log_retention_days` | number | `30` | No | 30–730 |
 | `role_assignments` | map | `{}` | No | `{ label: { principal_id, role_definition_name } }` |
 | `allowed_locations` | list(string) | `[]` | No | Enforces allowed regions via Azure Policy. Empty = skip |
 | `tags` | map(string) | `{}` | No | Applied to all resources |
-
-`environment` is injected automatically from the top-level config field.
 
 #### Outputs (available to `application` stage via remote state)
 
@@ -184,22 +195,26 @@ Deploys the application stack. References the landing zone via Terraform remote 
 
 #### Inputs (`config.json` → `application` section)
 
+Resource names are derived automatically using the same pattern as the landing zone:
+
+| Resource | Derived name |
+|----------|-------------|
+| App Service Plan | `asp-{workload}-{environment}-{location_short}` |
+| App Service | `app-{workload}-{environment}-{location_short}` |
+| Application Insights | `appi-app-{workload}-{environment}-{location_short}` |
+| SQL Server | `sql-{workload}-{environment}-{location_short}` |
+| SQL Database | `sqldb-{workload}-{environment}-{location_short}` |
+
 | Key | Type | Default | Required | Description |
 |-----|------|---------|----------|-------------|
-| `location` | string | — | Yes | Azure region |
 | `vnet_integration_subnet_name` | string | `"snet-app"` | No | Subnet name from the landing zone for App Service VNet integration |
-| `app_service_plan_name` | string | — | Yes | App Service Plan name |
 | `app_service_plan_sku_name` | string | `"B2"` | No | SKU name (e.g., `B1`, `S1`, `P1v3`) |
-| `app_service_name` | string | — | Yes | App Service name (globally unique) |
 | `app_stack` | object | `{}` | No | Runtime stack. Set one of: `dotnet_version`, `node_version`, `python_version`, `java_version` |
-| `sql_server_name` | string | — | Yes | SQL Server name (globally unique) |
-| `sql_database_name` | string | — | Yes | SQL database name |
 | `sql_database_sku_name` | string | `"S1"` | No | Database SKU |
-| `sql_aad_admin_login` | string | — | Yes | Azure AD group or user name for SQL administration |
-| `sql_aad_admin_object_id` | string | — | Yes | Object ID of the Azure AD SQL administrator |
+| `sql_aad_admin_login` | string | — | Yes | Display name of the Azure AD security group to assign as SQL administrator. The object ID is resolved automatically via a data source. |
 | `tags` | map(string) | `{}` | No | Applied to all resources |
 
-`environment`, `resource_group_name`, `vnet_integration_subnet_id`, `log_analytics_workspace_id`, and `key_vault_id` are all resolved automatically — do not include them in the config.
+`workload`, `environment`, `location`, `location_short`, `resource_group_name`, `vnet_integration_subnet_id`, `log_analytics_workspace_id`, and `key_vault_id` are all resolved automatically — do not include them in the config.
 
 ---
 
@@ -313,7 +328,7 @@ See the full setup guide in [consumer-example/README.md](./consumer-example/READ
 2. Copy `consumer-example/config.json` and `consumer-example/.github/` into the repo root
 3. Replace `YOUR_ORG/terraform-factory` with the actual org/repo in `deploy.yml`
 4. Update both `@v1.0.0` references to the latest factory release tag
-5. Update all values in `config.json` for your environment
+5. Set `workload`, `environment`, `location`, and `location_short` in `config.json` — all resource names are derived automatically
 6. Create the Azure state backend storage account
 7. Create a Service Principal with OIDC federated credentials
 8. Add `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` (and `FACTORY_READ_TOKEN` if factory is private) as GitHub secrets

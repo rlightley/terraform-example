@@ -1,11 +1,16 @@
-variable "resource_group_name" {
+variable "workload" {
   type        = string
-  description = "Name of the resource group to deploy application resources into"
+  description = "Workload name used to derive resource names"
 }
 
 variable "location" {
   type        = string
   description = "Azure region for all resources"
+}
+
+variable "location_short" {
+  type        = string
+  description = "Short region code used in resource names (e.g. uks, euw)"
 }
 
 variable "environment" {
@@ -17,20 +22,10 @@ variable "environment" {
   }
 }
 
-variable "app_service_plan_name" {
-  type        = string
-  description = "Name of the App Service Plan"
-}
-
 variable "app_service_plan_sku_name" {
   type        = string
   description = "SKU name for the App Service Plan (e.g., B1, B2, S1, P1v3)"
   default     = "B2"
-}
-
-variable "app_service_name" {
-  type        = string
-  description = "Name of the App Service (globally unique)"
 }
 
 variable "app_stack" {
@@ -46,16 +41,6 @@ variable "app_stack" {
   default     = {}
 }
 
-variable "sql_server_name" {
-  type        = string
-  description = "Name of the Azure SQL Server (globally unique)"
-}
-
-variable "sql_database_name" {
-  type        = string
-  description = "Name of the SQL database"
-}
-
 variable "sql_database_sku_name" {
   type        = string
   description = "SKU name for the SQL database (e.g., S0, S1, GP_S_Gen5_1)"
@@ -65,11 +50,6 @@ variable "sql_database_sku_name" {
 variable "sql_aad_admin_login" {
   type        = string
   description = "Login name of the Azure AD administrator for the SQL server"
-}
-
-variable "sql_aad_admin_object_id" {
-  type        = string
-  description = "Object ID of the Azure AD group or user to assign as SQL server administrator"
 }
 
 variable "vnet_integration_subnet_id" {

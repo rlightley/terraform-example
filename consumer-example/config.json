@@ -1,5 +1,8 @@
 {
+  "workload": "myapp",
   "environment": "prod",
+  "location": "uksouth",
+  "location_short": "uks",
 
   "backend": {
     "resource_group_name": "rg-terraform-state",
@@ -10,9 +13,6 @@
   },
 
   "landing_zone": {
-    "resource_group_name": "rg-myapp-prod",
-    "location": "uksouth",
-    "vnet_name": "vnet-myapp-prod",
     "vnet_address_space": ["10.0.0.0/16"],
     "subnets": {
       "snet-app": {
@@ -24,10 +24,8 @@
         "service_endpoints": []
       }
     },
-    "key_vault_name": "kv-myapp-prod-001",
     "key_vault_sku": "standard",
     "key_vault_network_default_action": "Allow",
-    "log_analytics_workspace_name": "law-myapp-prod",
     "log_analytics_sku": "PerGB2018",
     "log_retention_days": 90,
     "allowed_locations": ["uksouth", "ukwest"],
@@ -41,19 +39,13 @@
   },
 
   "application": {
-    "location": "uksouth",
     "vnet_integration_subnet_name": "snet-app",
-    "app_service_plan_name": "asp-myapp-prod",
     "app_service_plan_sku_name": "B2",
-    "app_service_name": "app-myapp-prod-001",
     "app_stack": {
       "dotnet_version": "8.0"
     },
-    "sql_server_name": "sql-myapp-prod-001",
-    "sql_database_name": "sqldb-myapp-prod",
     "sql_database_sku_name": "S1",
     "sql_aad_admin_login": "myapp-dba-group",
-    "sql_aad_admin_object_id": "00000000-0000-0000-0000-000000000000",
     "tags": {
       "environment": "prod",
       "project": "myapp",

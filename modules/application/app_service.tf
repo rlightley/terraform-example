@@ -1,6 +1,6 @@
 resource "azurerm_service_plan" "main" {
-  name                = var.app_service_plan_name
-  resource_group_name = var.resource_group_name
+  name                = local.app_service_plan_name
+  resource_group_name = local.resource_group_name
   location            = var.location
   os_type             = "Linux"
   sku_name            = var.app_service_plan_sku_name
@@ -8,8 +8,8 @@ resource "azurerm_service_plan" "main" {
 }
 
 resource "azurerm_linux_web_app" "main" {
-  name                      = var.app_service_name
-  resource_group_name       = var.resource_group_name
+  name                      = local.app_service_name
+  resource_group_name       = local.resource_group_name
   location                  = var.location
   service_plan_id           = azurerm_service_plan.main.id
   https_only                = true
@@ -46,8 +46,8 @@ resource "azurerm_linux_web_app" "main" {
 }
 
 resource "azurerm_application_insights" "main" {
-  name                = "appi-${var.app_service_name}"
-  resource_group_name = var.resource_group_name
+  name                = "appi-${local.app_service_name}"
+  resource_group_name = local.resource_group_name
   location            = var.location
   workspace_id        = var.log_analytics_workspace_id
   application_type    = "web"
@@ -55,7 +55,7 @@ resource "azurerm_application_insights" "main" {
 }
 
 resource "azurerm_monitor_diagnostic_setting" "app_service" {
-  name                       = "diag-${var.app_service_name}"
+  name                       = "diag-${local.app_service_name}"
   target_resource_id         = azurerm_linux_web_app.main.id
   log_analytics_workspace_id = var.log_analytics_workspace_id
 

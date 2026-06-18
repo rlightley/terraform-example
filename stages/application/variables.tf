@@ -1,4 +1,12 @@
+variable "workload" {
+  type = string
+}
+
 variable "location" {
+  type = string
+}
+
+variable "location_short" {
   type = string
 }
 
@@ -35,17 +43,9 @@ variable "vnet_integration_subnet_name" {
   default = "snet-app"
 }
 
-variable "app_service_plan_name" {
-  type = string
-}
-
 variable "app_service_plan_sku_name" {
   type    = string
   default = "B2"
-}
-
-variable "app_service_name" {
-  type = string
 }
 
 variable "app_stack" {
@@ -60,24 +60,12 @@ variable "app_stack" {
   default = {}
 }
 
-variable "sql_server_name" {
-  type = string
-}
-
-variable "sql_database_name" {
-  type = string
-}
-
 variable "sql_database_sku_name" {
   type    = string
   default = "S1"
 }
 
 variable "sql_aad_admin_login" {
-  type = string
-}
-
-variable "sql_aad_admin_object_id" {
   type = string
 }
 

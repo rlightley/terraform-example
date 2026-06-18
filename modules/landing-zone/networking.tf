@@ -1,5 +1,5 @@
 resource "azurerm_virtual_network" "main" {
-  name                = var.vnet_name
+  name                = local.vnet_name
   resource_group_name = azurerm_resource_group.main.name
   location            = azurerm_resource_group.main.location
   address_space       = var.vnet_address_space
@@ -33,7 +33,7 @@ resource "azurerm_subnet_network_security_group_association" "subnets" {
 }
 
 resource "azurerm_monitor_diagnostic_setting" "vnet" {
-  name                       = "diag-${var.vnet_name}"
+  name                       = "diag-${local.vnet_name}"
   target_resource_id         = azurerm_virtual_network.main.id
   log_analytics_workspace_id = azurerm_log_analytics_workspace.main.id
 

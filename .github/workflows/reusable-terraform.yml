@@ -79,6 +79,9 @@ jobs:
           fi
 
           ENV=$(jq -r '.environment' "$CONFIG")
+          WORKLOAD=$(jq -r '.workload' "$CONFIG")
+          LOCATION=$(jq -r '.location' "$CONFIG")
+          LOCATION_SHORT=$(jq -r '.location_short' "$CONFIG")
           BACKEND_RG=$(jq -r '.backend.resource_group_name' "$CONFIG")
           BACKEND_SA=$(jq -r '.backend.storage_account_name' "$CONFIG")
           BACKEND_CONTAINER=$(jq -r '.backend.container_name' "$CONFIG")
@@ -101,8 +104,14 @@ jobs:
               --argjson stage "$(jq ".${CONFIG_KEY}" "$CONFIG")" \
               --argjson backend "$(jq '.backend' "$CONFIG")" \
               --arg env "$ENV" \
+              --arg workload "$WORKLOAD" \
+              --arg location "$LOCATION" \
+              --arg location_short "$LOCATION_SHORT" \
               '$stage + {
                 environment: $env,
+                workload: $workload,
+                location: $location,
+                location_short: $location_short,
                 state_backend_resource_group_name: $backend.resource_group_name,
                 state_backend_storage_account_name: $backend.storage_account_name,
                 state_backend_container_name: $backend.container_name,
@@ -112,7 +121,15 @@ jobs:
             jq -n \
               --argjson stage "$(jq ".${CONFIG_KEY}" "$CONFIG")" \
               --arg env "$ENV" \
-              '$stage + {environment: $env}' > "$STAGEDIR/terraform.auto.tfvars.json"
+              --arg workload "$WORKLOAD" \
+              --arg location "$LOCATION" \
+              --arg location_short "$LOCATION_SHORT" \
+              '$stage + {
+                environment: $env,
+                workload: $workload,
+                location: $location,
+                location_short: $location_short
+              }' > "$STAGEDIR/terraform.auto.tfvars.json"
           fi
 
       - name: Package stage workspace

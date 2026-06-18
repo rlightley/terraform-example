@@ -21,16 +21,14 @@ provider "azurerm" {
 module "landing_zone" {
   source = "../../modules/landing-zone"
 
-  resource_group_name              = var.resource_group_name
+  workload                         = var.workload
   location                         = var.location
+  location_short                   = var.location_short
   environment                      = var.environment
-  vnet_name                        = var.vnet_name
   vnet_address_space               = var.vnet_address_space
   subnets                          = var.subnets
-  key_vault_name                   = var.key_vault_name
   key_vault_sku                    = var.key_vault_sku
   key_vault_network_default_action = var.key_vault_network_default_action
-  log_analytics_workspace_name     = var.log_analytics_workspace_name
   log_analytics_sku                = var.log_analytics_sku
   log_retention_days               = var.log_retention_days
   role_assignments                 = var.role_assignments

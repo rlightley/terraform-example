@@ -1,5 +1,10 @@
 data "azurerm_client_config" "current" {}
 
+data "azuread_group" "sql_admin" {
+  display_name     = var.sql_aad_admin_login
+  security_enabled = true
+}
+
 resource "random_password" "sql_admin" {
   length           = 32
   special          = true
@@ -13,8 +18,8 @@ resource "azurerm_key_vault_secret" "sql_admin_password" {
 }
 
 resource "azurerm_mssql_server" "main" {
-  name                          = var.sql_server_name
-  resource_group_name           = var.resource_group_name
+  name                          = local.sql_server_name
+  resource_group_name           = local.resource_group_name
   location                      = var.location
   version                       = "12.0"
   administrator_login           = "sqladmin"
@@ -24,7 +29,7 @@ resource "azurerm_mssql_server" "main" {
 
   azuread_administrator {
     login_username              = var.sql_aad_admin_login
-    object_id                   = var.sql_aad_admin_object_id
+    object_id                   = data.azuread_group.sql_admin.object_id
     azuread_authentication_only = false
   }
 
@@ -32,7 +37,7 @@ resource "azurerm_mssql_server" "main" {
 }
 
 resource "azurerm_mssql_database" "main" {
-  name      = var.sql_database_name
+  name      = local.sql_database_name
   server_id = azurerm_mssql_server.main.id
   sku_name  = var.sql_database_sku_name
   tags      = var.tags
@@ -44,7 +49,7 @@ resource "azurerm_mssql_server_extended_auditing_policy" "main" {
 }
 
 resource "azurerm_monitor_diagnostic_setting" "sql" {
-  name                       = "diag-${var.sql_server_name}"
+  name                       = "diag-${local.sql_server_name}"
   target_resource_id         = "${azurerm_mssql_server.main.id}/databases/master"
   log_analytics_workspace_id = var.log_analytics_workspace_id
 

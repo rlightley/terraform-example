@@ -9,6 +9,10 @@ terraform {
       source  = "hashicorp/random"
       version = "~> 3.6"
     }
+    azuread = {
+      source  = "hashicorp/azuread"
+      version = "~> 2.50"
+    }
   }
   backend "azurerm" {}
 }
@@ -16,6 +20,8 @@ terraform {
 provider "azurerm" {
   features {}
 }
+
+provider "azuread" {}
 
 data "terraform_remote_state" "landing_zone" {
   backend = "azurerm"
@@ -30,18 +36,14 @@ data "terraform_remote_state" "landing_zone" {
 module "application" {
   source = "../../modules/application"
 
-  resource_group_name        = data.terraform_remote_state.landing_zone.outputs.resource_group_name
+  workload                   = var.workload
   location                   = var.location
+  location_short             = var.location_short
   environment                = var.environment
-  app_service_plan_name      = var.app_service_plan_name
   app_service_plan_sku_name  = var.app_service_plan_sku_name
-  app_service_name           = var.app_service_name
   app_stack                  = var.app_stack
-  sql_server_name            = var.sql_server_name
-  sql_database_name          = var.sql_database_name
   sql_database_sku_name      = var.sql_database_sku_name
   sql_aad_admin_login        = var.sql_aad_admin_login
-  sql_aad_admin_object_id    = var.sql_aad_admin_object_id
   vnet_integration_subnet_id = data.terraform_remote_state.landing_zone.outputs.subnet_ids[var.vnet_integration_subnet_name]
   log_analytics_workspace_id = data.terraform_remote_state.landing_zone.outputs.log_analytics_workspace_id
   key_vault_id               = data.terraform_remote_state.landing_zone.outputs.key_vault_id
