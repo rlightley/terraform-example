@@ -1,0 +1,6 @@
+compact: false
+framework:
+  - terraform
+download_external_modules: true
+skip_checks:
+  - CKV_AZURE_109

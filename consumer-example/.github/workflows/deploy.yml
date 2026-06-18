@@ -1,0 +1,39 @@
+name: Deploy Infrastructure
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      config_path:
+        description: Path to the environment config file
+        required: false
+        default: config.json
+
+jobs:
+  deploy-landing-zone:
+    name: Landing Zone
+    uses: YOUR_ORG/terraform-factory/.github/workflows/reusable-terraform.yml@v1.0.0
+    with:
+      stage: landing-zone
+      factory_repository: YOUR_ORG/terraform-factory
+      factory_ref: v1.0.0
+      config_path: ${{ github.event.inputs.config_path || 'config.json' }}
+      terraform_version: "1.9.0"
+    secrets: inherit
+
+  deploy-application:
+    name: Application
+    needs: deploy-landing-zone
+    uses: YOUR_ORG/terraform-factory/.github/workflows/reusable-terraform.yml@v1.0.0
+    with:
+      stage: application
+      factory_repository: YOUR_ORG/terraform-factory
+      factory_ref: v1.0.0
+      config_path: ${{ github.event.inputs.config_path || 'config.json' }}
+      terraform_version: "1.9.0"
+    secrets: inherit
