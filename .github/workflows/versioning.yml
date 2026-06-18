@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: read
 
 jobs:
   release:
@@ -40,6 +41,7 @@ jobs:
         run: git-cliff --config cliff.toml --tag ${{ steps.tag.outputs.new_tag }} --output CHANGELOG.md
         env:
           GITHUB_REPO: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Commit CHANGELOG
         if: steps.tag.outputs.new_tag != ''
