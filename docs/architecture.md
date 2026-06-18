@@ -1,5 +1,7 @@
 # Terraform Factory — Architecture
 
+> For the full variable reference, module inputs, and setup guide see the **[README](../README.md)**.
+
 ## The Problem
 
 Without a central approach, teams end up copy-pasting Terraform, each maintaining their own pipelines, inventing their own naming conventions, and applying security controls inconsistently. The factory pattern solves this.

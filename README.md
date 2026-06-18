@@ -22,44 +22,34 @@ This repository is a **centralised Terraform factory** for deploying a lightweig
 - [Contributing](#contributing)
 - [Azure Best Practices](#azure-best-practices)
 
+> For a visual walkthrough of the architecture, pipeline flow, naming convention, and environment strategy see **[docs/architecture.md](./docs/architecture.md)**.
+
 ---
 
 ## How It Works
 
-```
- ┌───────────────────────────────────────────────────┐
- │              terraform-factory (this repo)         │
- │                                                    │
- │   stages/landing-zone/    ◄── root TF configs      │
- │   stages/application/                              │
- │                                                    │
- │   modules/landing-zone/   ◄── reusable modules     │
- │   modules/application/                             │
- │                                                    │
- │   .github/workflows/reusable-terraform.yml         │
- └───────────────────────────────────────────────────┘
-                   ▲                ▲
-        workflow_call @tag     second checkout @tag
-                   │                │
- ┌───────────────────────────────────────────────────┐
- │         consumer-repo (team creates this)          │
- │                                                    │
- │   config.json            ◄── only config needed    │
- │   custom/                ◄── optional extra .tf    │
- │   .github/workflows/deploy.yml                     │
- └───────────────────────────────────────────────────┘
+The factory uses a **two-repo pattern**. The factory repo owns all Terraform code, security policy, and the reusable pipeline. Consumer repos contain only a `config.json` and a thin deploy workflow — no Terraform knowledge required.
+
+```mermaid
+graph TB
+    subgraph factory["terraform-factory (this repo)"]
+        modules["modules/\n─ landing-zone\n─ application"]
+        stages["stages/\n─ landing-zone\n─ application"]
+        workflow["reusable-terraform.yml"]
+        modules --> stages
+    end
+
+    subgraph consumer["consumer-repo (one per workload)"]
+        config["config.json\nworkload · environment\nlocation · SKUs · networking"]
+        deploy["deploy.yml\ncalls factory @v1.2.0"]
+    end
+
+    deploy -- "workflow_call @tag" --> workflow
+    workflow -- "checkout factory @tag" --> stages
+    config -- "parsed at runtime" --> workflow
 ```
 
-**Deployment flow:**
-
-1. Consumer triggers `deploy.yml`, passing a config file path
-2. The factory's reusable workflow runs in the consumer's context
-3. It checks out the factory repo (at the pinned `factory_ref` tag) alongside the consumer repo
-4. It parses `config.json` to extract backend config and stage-specific variables
-5. Any custom `.tf` files from `consumer/custom/{stage}/` are merged into the factory's stage directory
-6. A `terraform.auto.tfvars.json` is generated from the config and placed in the stage workspace
-7. Checkov runs security checks, then Terraform plans with the backend config injected as flags
-8. A GitHub Environment protection rule gates the apply — a reviewer must approve before it runs
+When the pipeline runs, it checks out the factory at the pinned tag, parses `config.json`, generates `terraform.auto.tfvars.json`, merges any consumer custom `.tf` files, and runs the stage. The consumer never contains Terraform code.
 
 ---
 
@@ -98,6 +88,8 @@ This repository is a **centralised Terraform factory** for deploying a lightweig
 │   ├── config.json                       # All configuration in one file
 │   ├── .checkov.yml
 │   └── .github/workflows/deploy.yml
+├── docs/
+│   └── architecture.md                   # Visual architecture guide with Mermaid diagrams
 ├── .checkov.yml
 ├── CHANGELOG.md
 └── README.md
@@ -237,8 +229,19 @@ Stages are the deployable root Terraform configurations. They are not called by 
 
 Each stage runs four sequential jobs:
 
-```
-setup ──► security-scan ──► plan ──► apply
+```mermaid
+flowchart LR
+    A["setup\nparse config.json\nmerge custom .tf files\nbuild workspace artifact"]
+    B["security-scan\nCheckov\nSARIF → Code Scanning"]
+    C["plan\nterraform init\nterraform plan"]
+    D{{"approval gate\n{environment}-apply"}}
+    E["apply\nterraform apply tfplan"]
+    SKIP["skip\n(no changes)"]
+
+    A --> B --> C
+    C -- "exit 2 (changes)" --> D
+    C -- "exit 0 (no changes)" --> SKIP
+    D -- "approved" --> E
 ```
 
 | Job | What it does |
