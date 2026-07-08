@@ -1,0 +1,76 @@
+# Consumer deployment pipeline — Azure DevOps equivalent of .github/workflows/deploy.yml
+#
+# This is the only pipeline file a consumer team needs.
+# It calls the factory's reusable stage template twice: landing-zone then application.
+# No Terraform code lives here — all of it runs from the factory at the pinned tag.
+#
+# Setup checklist:
+#   1. Replace YOUR_PROJECT/terraform-factory with your actual Azure DevOps project/repo.
+#   2. Update the factory resource ref to the latest release tag.
+#   3. Set azureServiceConnection to your ARM service connection name.
+#   4. Create Azure DevOps Environments:
+#        prod-apply  (or dev-apply / staging-apply to match your environment value)
+#      Under Pipelines → Environments → {name} → Approvals and checks → add approvers.
+#   5. Push this file to your consumer repo under azure-devops/deploy.yml and register
+#      it as a pipeline in Azure DevOps.
+#
+# Upgrading the factory version:
+#   Bump BOTH the resource ref AND the factoryRef parameter to the same tag.
+#   Check CHANGELOG.md in the factory repo for breaking changes before upgrading.
+#   A major version bump means at least one variable was removed or renamed.
+
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    exclude:
+      - README.md
+
+pr:
+  branches:
+    include:
+      - main
+
+# ── Factory repository resource ────────────────────────────────────────────────
+# Pin to a specific factory release tag. Bump this ref to upgrade.
+resources:
+  repositories:
+    - repository: factory
+      type: git                               # change to 'github' if factory is on GitHub
+      name: YOUR_PROJECT/terraform-factory   # e.g. PEngDo/terraform-factory
+      ref: refs/tags/v1.0.0                  # pin to a factory release tag
+
+# ── Pipeline-level variables ───────────────────────────────────────────────────
+variables:
+  azureServiceConnection: YOUR_SERVICE_CONNECTION  # ARM service connection name
+  environment: prod                                 # matches config.json "environment"
+  terraformVersion: "1.9.0"
+  configPath: config.json
+
+# ── Stages ─────────────────────────────────────────────────────────────────────
+# Each stage call expands to: setup → security-scan → plan → apply (with approval gate).
+# The application stage depends on landing_zone completing successfully.
+
+stages:
+
+  # Deploy the landing zone (VNet, Key Vault, Log Analytics, RBAC)
+  - template: azure-devops/templates/terraform-stage.yml@factory
+    parameters:
+      stage: landing-zone
+      environment: $(environment)
+      azureServiceConnection: $(azureServiceConnection)
+      configPath: $(configPath)
+      terraformVersion: $(terraformVersion)
+      checkovSkipChecks: "CKV_AZURE_109"   # KV network action is intentionally variable
+
+  # Deploy the application stack (App Service, SQL, App Insights)
+  # Waits for landing_zone to complete — reads its outputs via terraform_remote_state.
+  - template: azure-devops/templates/terraform-stage.yml@factory
+    parameters:
+      stage: application
+      environment: $(environment)
+      azureServiceConnection: $(azureServiceConnection)
+      configPath: $(configPath)
+      terraformVersion: $(terraformVersion)
+      dependsOn: [landing_zone]

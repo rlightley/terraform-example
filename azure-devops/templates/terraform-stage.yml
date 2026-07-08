@@ -1,0 +1,397 @@
+# Reusable stage template — Azure DevOps equivalent of reusable-terraform.yml
+#
+# Called by consumer pipelines to deploy one Terraform stage (landing-zone or application).
+# Each call expands into four jobs: setup → security-scan → plan → apply.
+# The apply job targets an Azure DevOps Environment for human approval.
+#
+# Prerequisites in the consumer pipeline:
+#   resources:
+#     repositories:
+#       - repository: factory
+#         type: git                          # or 'github' if factory is on GitHub
+#         name: YOUR_PROJECT/terraform-factory
+#         ref: refs/tags/v1.2.0             # pin to a factory release tag
+#
+# Authentication:
+#   azureServiceConnection must be a service connection using Workload Identity
+#   Federation (recommended) or a Service Principal with client secret.
+#   The Build Service account needs "Contribute" on the factory repo to allow
+#   checkout, and "Contribute" on the consumer repo if using this for the versioning
+#   pipeline.
+#
+# Approval gates:
+#   Create an Azure DevOps Environment named "{environment}-apply" (e.g. prod-apply)
+#   under Pipelines → Environments and add required approvers. The apply job will
+#   block until approved. If terraform plan exits with no changes the apply job is
+#   skipped entirely — no approval is raised.
+
+parameters:
+  - name: stage
+    type: string
+    values:
+      - landing-zone
+      - application
+
+  - name: environment
+    type: string
+    # Must match the prefix of an Azure DevOps Environment named {environment}-apply.
+    # Examples: dev, staging, prod
+
+  - name: azureServiceConnection
+    type: string
+    # Name of the Azure Resource Manager service connection in this project.
+
+  - name: configPath
+    type: string
+    default: config.json
+
+  - name: terraformVersion
+    type: string
+    default: "1.9.0"
+
+  - name: checkovSkipChecks
+    type: string
+    default: ""
+    # Comma-separated Checkov check IDs to skip, e.g. "CKV_AZURE_109,CKV_AZURE_110"
+
+  - name: dependsOn
+    type: object
+    default: []
+    # Stage IDs this stage must wait for. Pass [landing_zone] for the application stage.
+
+stages:
+  - stage: ${{ replace(parameters.stage, '-', '_') }}
+    displayName: ${{ parameters.stage }}
+    dependsOn: ${{ parameters.dependsOn }}
+
+    jobs:
+
+      # ────────────────────────────────────────────────────────────────────────
+      # Setup
+      # Checks out both repos, parses config.json, merges custom .tf files,
+      # generates terraform.auto.tfvars.json, and packages a workspace artifact
+      # that all downstream jobs consume.
+      # ────────────────────────────────────────────────────────────────────────
+      - job: setup
+        displayName: Setup
+        steps:
+          - checkout: self
+            path: consumer
+            displayName: Checkout consumer repo
+
+          - checkout: factory
+            path: factory
+            displayName: Checkout factory at pinned ref
+
+          - bash: |
+              set -euo pipefail
+
+              STAGE="${{ parameters.stage }}"
+              CONFIG="$(Pipeline.Workspace)/consumer/${{ parameters.configPath }}"
+              CONFIG_KEY="${STAGE//-/_}"
+              STAGEDIR="$(Pipeline.Workspace)/factory/stages/${STAGE}"
+
+              if [ ! -f "$CONFIG" ]; then
+                echo "##[error]Config file not found: $CONFIG"
+                exit 1
+              fi
+
+              ENV=$(jq -r '.environment'                         "$CONFIG")
+              WORKLOAD=$(jq -r '.workload'                       "$CONFIG")
+              LOCATION=$(jq -r '.location'                       "$CONFIG")
+              LOCATION_SHORT=$(jq -r '.location_short'           "$CONFIG")
+              BACKEND_RG=$(jq -r '.backend.resource_group_name'  "$CONFIG")
+              BACKEND_SA=$(jq -r '.backend.storage_account_name' "$CONFIG")
+              BACKEND_CONTAINER=$(jq -r '.backend.container_name' "$CONFIG")
+              STAGE_KEY=$(jq -r ".backend.${CONFIG_KEY}_state_key" "$CONFIG")
+
+              echo "##vso[task.setvariable variable=backendRg;isOutput=true]$BACKEND_RG"
+              echo "##vso[task.setvariable variable=backendSa;isOutput=true]$BACKEND_SA"
+              echo "##vso[task.setvariable variable=backendContainer;isOutput=true]$BACKEND_CONTAINER"
+              echo "##vso[task.setvariable variable=stageKey;isOutput=true]$STAGE_KEY"
+
+              # Merge any custom .tf files from the consumer repo into the stage directory.
+              CUSTOM_DIR="$(Pipeline.Workspace)/consumer/custom/${STAGE}"
+              if [ -d "$CUSTOM_DIR" ]; then
+                echo "Merging custom Terraform files from $CUSTOM_DIR"
+                find "$CUSTOM_DIR" -maxdepth 1 -name '*.tf' -exec cp {} "$STAGEDIR/" \;
+              fi
+
+              # Generate terraform.auto.tfvars.json from config.json.
+              # The application stage also needs backend coords so terraform_remote_state
+              # can reach the landing-zone state file.
+              if [ "$STAGE" = "application" ]; then
+                jq -n \
+                  --argjson stage "$(jq ".${CONFIG_KEY}" "$CONFIG")" \
+                  --argjson backend "$(jq '.backend' "$CONFIG")" \
+                  --arg env "$ENV" \
+                  --arg workload "$WORKLOAD" \
+                  --arg location "$LOCATION" \
+                  --arg location_short "$LOCATION_SHORT" \
+                  '$stage + {
+                    environment: $env,
+                    workload: $workload,
+                    location: $location,
+                    location_short: $location_short,
+                    state_backend_resource_group_name: $backend.resource_group_name,
+                    state_backend_storage_account_name: $backend.storage_account_name,
+                    state_backend_container_name: $backend.container_name,
+                    landing_zone_state_key: $backend.landing_zone_state_key
+                  }' > "$STAGEDIR/terraform.auto.tfvars.json"
+              else
+                jq -n \
+                  --argjson stage "$(jq ".${CONFIG_KEY}" "$CONFIG")" \
+                  --arg env "$ENV" \
+                  --arg workload "$WORKLOAD" \
+                  --arg location "$LOCATION" \
+                  --arg location_short "$LOCATION_SHORT" \
+                  '$stage + {
+                    environment: $env,
+                    workload: $workload,
+                    location: $location,
+                    location_short: $location_short
+                  }' > "$STAGEDIR/terraform.auto.tfvars.json"
+              fi
+            displayName: Prepare workspace
+            name: prepare
+
+          - bash: |
+              tar -czf "$(Build.ArtifactStagingDirectory)/workspace.tar.gz" \
+                -C "$(Pipeline.Workspace)/factory/stages/${{ parameters.stage }}" .
+            displayName: Package workspace
+
+          - task: PublishPipelineArtifact@1
+            displayName: Publish workspace artifact
+            inputs:
+              targetPath: $(Build.ArtifactStagingDirectory)/workspace.tar.gz
+              artifact: workspace-${{ parameters.stage }}-$(Build.BuildId)
+
+      # ────────────────────────────────────────────────────────────────────────
+      # Security Scan
+      # Runs Checkov against the workspace. Publishes a SARIF artifact.
+      # Hard fails the pipeline — plan will not run if Checkov finds violations.
+      # To upload SARIF to Microsoft Defender for DevOps (Advanced Security),
+      # use the MicrosoftSecurityDevOps@1 task instead of running Checkov directly.
+      # ────────────────────────────────────────────────────────────────────────
+      - job: security_scan
+        displayName: Security Scan
+        dependsOn: setup
+        steps:
+          - checkout: none
+
+          - task: DownloadPipelineArtifact@2
+            displayName: Download workspace artifact
+            inputs:
+              artifact: workspace-${{ parameters.stage }}-$(Build.BuildId)
+              targetPath: $(Pipeline.Workspace)/dl
+
+          - bash: |
+              mkdir -p $(Pipeline.Workspace)/workspace
+              tar -xzf $(Pipeline.Workspace)/dl/workspace.tar.gz \
+                -C $(Pipeline.Workspace)/workspace
+            displayName: Extract workspace
+
+          - bash: |
+              set -euo pipefail
+              pip install checkov --quiet
+
+              SKIP_ARGS=""
+              if [ -n "$CHECKOV_SKIP_CHECKS" ]; then
+                SKIP_ARGS="--skip-check $CHECKOV_SKIP_CHECKS"
+              fi
+
+              checkov \
+                --directory $(Pipeline.Workspace)/workspace \
+                --framework terraform \
+                --output cli \
+                --output sarif \
+                --output-file-path "console,$(Pipeline.Workspace)/checkov-results.sarif" \
+                --download-external-modules true \
+                $SKIP_ARGS
+            displayName: Run Checkov
+            env:
+              CHECKOV_SKIP_CHECKS: ${{ parameters.checkovSkipChecks }}
+
+          - task: PublishPipelineArtifact@1
+            displayName: Publish Checkov SARIF
+            condition: always()
+            inputs:
+              targetPath: $(Pipeline.Workspace)/checkov-results.sarif
+              artifact: checkov-sarif-${{ parameters.stage }}-$(Build.BuildId)
+
+      # ────────────────────────────────────────────────────────────────────────
+      # Terraform Plan
+      # Runs terraform init and plan. Captures the detailed exit code:
+      #   0 = no changes  →  apply job is skipped, no approval raised
+      #   1 = error       →  pipeline fails here
+      #   2 = changes     →  tfplan artifact published, apply job runs
+      # Plan output is published as a job summary (visible in the pipeline run UI).
+      # ────────────────────────────────────────────────────────────────────────
+      - job: plan
+        displayName: Terraform Plan
+        dependsOn: [setup, security_scan]
+        variables:
+          backendRg:        $[dependencies.setup.outputs['prepare.backendRg']]
+          backendSa:        $[dependencies.setup.outputs['prepare.backendSa']]
+          backendContainer: $[dependencies.setup.outputs['prepare.backendContainer']]
+          stageKey:         $[dependencies.setup.outputs['prepare.stageKey']]
+        steps:
+          - checkout: none
+
+          - task: DownloadPipelineArtifact@2
+            displayName: Download workspace artifact
+            inputs:
+              artifact: workspace-${{ parameters.stage }}-$(Build.BuildId)
+              targetPath: $(Pipeline.Workspace)/dl
+
+          - bash: |
+              mkdir -p $(Pipeline.Workspace)/workspace
+              tar -xzf $(Pipeline.Workspace)/dl/workspace.tar.gz \
+                -C $(Pipeline.Workspace)/workspace
+            displayName: Extract workspace
+
+          - bash: |
+              TF_VERSION="${{ parameters.terraformVersion }}"
+              wget -q "https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip"
+              unzip -q "terraform_${TF_VERSION}_linux_amd64.zip" -d /tmp/tf-install
+              sudo mv /tmp/tf-install/terraform /usr/local/bin/terraform
+              terraform version
+            displayName: Install Terraform
+
+          - task: AzureCLI@2
+            displayName: Terraform Init & Plan
+            name: plan
+            inputs:
+              azureSubscription: ${{ parameters.azureServiceConnection }}
+              scriptType: bash
+              addSpnToEnvironment: true
+              workingDirectory: $(Pipeline.Workspace)/workspace
+              script: |
+                set -euo pipefail
+
+                # Workload Identity Federation — mirrors ARM_USE_OIDC in GitHub Actions.
+                # For a client-secret service connection, replace ARM_USE_OIDC + ARM_OIDC_TOKEN
+                # with: export ARM_CLIENT_SECRET=$servicePrincipalKey
+                export ARM_USE_OIDC=true
+                export ARM_OIDC_TOKEN=$idToken
+                export ARM_CLIENT_ID=$servicePrincipalId
+                export ARM_TENANT_ID=$tenantId
+                export ARM_SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+
+                terraform init \
+                  -backend-config="resource_group_name=$(backendRg)" \
+                  -backend-config="storage_account_name=$(backendSa)" \
+                  -backend-config="container_name=$(backendContainer)" \
+                  -backend-config="key=$(stageKey)"
+
+                terraform validate
+
+                set +e
+                terraform plan \
+                  -out=tfplan \
+                  -detailed-exitcode \
+                  -no-color 2>&1 | tee plan-output.txt
+                PLAN_EXIT=${PIPESTATUS[0]}
+                set -e
+
+                # Publish exit code for same-job task conditions and cross-job conditions.
+                echo "##vso[task.setvariable variable=planExitCode]$PLAN_EXIT"
+                echo "##vso[task.setvariable variable=planExitCode;isOutput=true]$PLAN_EXIT"
+
+                if [ "$PLAN_EXIT" -eq "1" ]; then
+                  echo "##[error]Terraform plan failed. See output above."
+                  exit 1
+                fi
+
+          - bash: |
+              {
+                echo "## Terraform Plan — ${{ parameters.stage }}"
+                echo ""
+                echo '```'
+                cat $(Pipeline.Workspace)/workspace/plan-output.txt
+                echo '```'
+              } > "$(Agent.TempDirectory)/plan-summary.md"
+              echo "##vso[task.uploadsummary]$(Agent.TempDirectory)/plan-summary.md"
+            displayName: Publish plan summary
+            condition: always()
+
+          - task: PublishPipelineArtifact@1
+            displayName: Publish tfplan artifact
+            condition: eq(variables['plan.planExitCode'], '2')
+            inputs:
+              targetPath: $(Pipeline.Workspace)/workspace/tfplan
+              artifact: tfplan-${{ parameters.stage }}-$(Build.BuildId)
+
+      # ────────────────────────────────────────────────────────────────────────
+      # Terraform Apply
+      # Deployment job — targets the Azure DevOps Environment {environment}-apply.
+      # Configure required approvers on that environment under
+      # Pipelines → Environments → {env}-apply → Approvals and checks.
+      # This job is skipped entirely if plan exit code was 0 (no changes).
+      # ────────────────────────────────────────────────────────────────────────
+      - deployment: apply
+        displayName: Terraform Apply
+        dependsOn: [setup, plan]
+        condition: eq(dependencies.plan.outputs['plan.planExitCode'], '2')
+        environment: ${{ parameters.environment }}-apply
+        variables:
+          backendRg:        $[dependencies.setup.outputs['prepare.backendRg']]
+          backendSa:        $[dependencies.setup.outputs['prepare.backendSa']]
+          backendContainer: $[dependencies.setup.outputs['prepare.backendContainer']]
+          stageKey:         $[dependencies.setup.outputs['prepare.stageKey']]
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - download: none
+
+                - task: DownloadPipelineArtifact@2
+                  displayName: Download workspace artifact
+                  inputs:
+                    artifact: workspace-${{ parameters.stage }}-$(Build.BuildId)
+                    targetPath: $(Pipeline.Workspace)/dl/workspace
+
+                - task: DownloadPipelineArtifact@2
+                  displayName: Download tfplan artifact
+                  inputs:
+                    artifact: tfplan-${{ parameters.stage }}-$(Build.BuildId)
+                    targetPath: $(Pipeline.Workspace)/dl/tfplan
+
+                - bash: |
+                    mkdir -p $(Pipeline.Workspace)/workspace
+                    tar -xzf $(Pipeline.Workspace)/dl/workspace/workspace.tar.gz \
+                      -C $(Pipeline.Workspace)/workspace
+                    cp $(Pipeline.Workspace)/dl/tfplan/tfplan \
+                       $(Pipeline.Workspace)/workspace/tfplan
+                  displayName: Extract workspace and plan
+
+                - bash: |
+                    TF_VERSION="${{ parameters.terraformVersion }}"
+                    wget -q "https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip"
+                    unzip -q "terraform_${TF_VERSION}_linux_amd64.zip" -d /tmp/tf-install
+                    sudo mv /tmp/tf-install/terraform /usr/local/bin/terraform
+                  displayName: Install Terraform
+
+                - task: AzureCLI@2
+                  displayName: Terraform Init & Apply
+                  inputs:
+                    azureSubscription: ${{ parameters.azureServiceConnection }}
+                    scriptType: bash
+                    addSpnToEnvironment: true
+                    workingDirectory: $(Pipeline.Workspace)/workspace
+                    script: |
+                      set -euo pipefail
+
+                      export ARM_USE_OIDC=true
+                      export ARM_OIDC_TOKEN=$idToken
+                      export ARM_CLIENT_ID=$servicePrincipalId
+                      export ARM_TENANT_ID=$tenantId
+                      export ARM_SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+
+                      terraform init \
+                        -backend-config="resource_group_name=$(backendRg)" \
+                        -backend-config="storage_account_name=$(backendSa)" \
+                        -backend-config="container_name=$(backendContainer)" \
+                        -backend-config="key=$(stageKey)"
+
+                      terraform apply -auto-approve tfplan
